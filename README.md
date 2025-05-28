@@ -162,3 +162,25 @@ Este passo é crucial para que o script possa se autenticar na sua conta AWS. Ex
     ]
 }
 ```
+
+### Permissões Necessárias Adicionais para AWS Organizations:
+
+- JSON
+
+```sh
+    {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "organizations:ListRoots",
+                "organizations:ListOrganizationalUnitsForParent",
+                "organizations:ListAccountsForParent"
+                # Adicione estas ao seu JSON de permissões existente
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```

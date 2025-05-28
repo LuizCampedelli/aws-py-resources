@@ -116,6 +116,71 @@ def get_aws_resources_info():
     """
     resource_info = {}
 
+    # --- AWS Organizations and OUs ---
+    organizations_client = boto3.client('organizations')
+    print("Coletando informações do AWS Organizations (Root, OUs e Contas)...")
+    try:
+        # Obter o Root da Organização
+        roots = get_all_paginated_items(organizations_client, 'list_roots', 'Roots')
+        all_org_info = []
+        if roots:
+            root = roots[0] # Uma organização tem apenas um Root
+            root_id = root['Id']
+            all_org_info.append({
+                'Type': 'Root',
+                'Id': root['Id'],
+                'Arn': root['Arn'],
+                'Name': root['Name'],
+                'PolicyTypes': [{'Type': pt['Type'], 'Status': pt['Status']} for pt in root.get('PolicyTypes', [])]
+            })
+            print(f"  Encontrado Root da Organização: {root['Name']} ({root['Id']}).")
+
+            # Função auxiliar recursiva para listar OUs e contas
+            def list_ous_and_accounts(parent_id, parent_name="Root", level=0):
+                # Listar OUs filhas
+                ous = get_all_paginated_items(organizations_client, 'list_organizational_units_for_parent', 'OrganizationalUnits', ParentId=parent_id)
+                for ou in ous:
+                    all_org_info.append({
+                        'Type': 'OrganizationalUnit',
+                        'Id': ou['Id'],
+                        'Arn': ou['Arn'],
+                        'Name': ou['Name'],
+                        'ParentId': parent_id,
+                        'ParentName': parent_name,
+                        'Level': level
+                    })
+                    print(f"    {'  ' * level}OU: {ou['Name']} ({ou['Id']})")
+                    # Chamada recursiva para OUs aninhadas
+                    list_ous_and_accounts(ou['Id'], ou['Name'], level + 1)
+                
+                # Listar contas filhas (diretamente sob o Root ou uma OU)
+                accounts = get_all_paginated_items(organizations_client, 'list_accounts_for_parent', 'Accounts', ParentId=parent_id)
+                for account in accounts:
+                    all_org_info.append({
+                        'Type': 'Account',
+                        'Id': account['Id'],
+                        'Arn': account['Arn'],
+                        'Name': account['Name'],
+                        'Email': account.get('Email'),
+                        'Status': account['Status'],
+                        'JoinedMethod': account['JoinedMethod'],
+                        'JoinedTimestamp': account['JoinedTimestamp'].strftime('%Y-%m-%d %H:%M:%S') if isinstance(account['JoinedTimestamp'], datetime) else str(account['JoinedTimestamp']),
+                        'ParentId': parent_id,
+                        'ParentName': parent_name,
+                        'Level': level
+                    })
+                    print(f"    {'  ' * level}  Conta: {account['Name']} ({account['Id']})")
+
+            list_ous_and_accounts(root_id)
+        else:
+            print("  Nenhuma organização AWS encontrada ou esta conta não é a conta de gerenciamento.")
+        
+        resource_info['AWSOrganizationStructure'] = all_org_info
+
+    except Exception as e:
+        print(f"  Erro ao listar recursos do AWS Organizations: {e}")
+        resource_info['AWSOrganizationStructure'] = f"Erro ao listar: {e}"
+
     # --- EC2 Resources (EC2, VPCs, Transit Gateways) ---
     ec2_client = boto3.client('ec2')
 
