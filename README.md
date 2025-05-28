@@ -7,6 +7,7 @@ Este script Python coleta informações detalhadas sobre diversos recursos na su
 Recursos Coletados
 O script atualmente coleta informações para os seguintes serviços e recursos, com paginação para garantir que todos os dados sejam obtidos:
 
+- AWS Organizations and OU´s: Lista Root, OrganizationalUnit, Account, IDs, ARNs
 - EC2: Instâncias, VPCs, Transit Gateways
 - S3: Buckets
 - Lambda: Funções
