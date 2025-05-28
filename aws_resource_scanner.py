@@ -19,7 +19,7 @@ def get_all_paginated_items(client, method_name, list_key, **kwargs):
         print(f"    Erro de paginação para {method_name}: {e}")
     return all_items
 
-def export_to_excel(data, filename="resources.xlsx"): # Nome de arquivo padrão alterado para 'resources.xlsx'
+def export_to_excel(data, filename="resources.xlsx"):
     """
     Exporta os dados coletados para um arquivo Excel.
     Cada tipo de recurso será uma aba diferente na planilha.
@@ -39,7 +39,6 @@ def export_to_excel(data, filename="resources.xlsx"): # Nome de arquivo padrão 
     for resource_type, resources_list in data.items():
         # Ignora chaves que não são listas ou estão vazias
         if not isinstance(resources_list, list) or not resources_list:
-            # print(f"  Pulando '{resource_type}' (sem dados ou formato inválido para exportação).")
             continue
 
         # Cria uma nova aba para cada tipo de recurso
@@ -216,30 +215,71 @@ def get_aws_resources_info():
         print(f"  Erro ao listar funções Lambda: {e}")
         resource_info['LambdaFunctions'] = f"Erro ao listar: {e}"
 
-    # --- RDS Instances ---
+    # --- RDS/Aurora Databases ---
     rds_client = boto3.client('rds')
-    print("Coletando informações de instâncias RDS...")
+    
+    print("Coletando informações de instâncias RDS (não-Aurora)...")
     try:
+        # Instâncias RDS que NÃO fazem parte de clusters Aurora
         db_instances = get_all_paginated_items(rds_client, 'describe_db_instances', 'DBInstances')
         all_rds_instances = []
         for db in db_instances:
-            all_rds_instances.append({
-                'DBInstanceIdentifier': db['DBInstanceIdentifier'],
-                'Engine': db['Engine'],
-                'DBInstanceClass': db['DBInstanceClass'],
-                'DBInstanceStatus': db['DBInstanceStatus'],
-                'AllocatedStorage': db['AllocatedStorage'],
-                'EndpointAddress': db.get('Endpoint', {}).get('Address'),
-                'MultiAZ': db['MultiAZ'],
-                'PubliclyAccessible': db['PubliclyAccessible'],
-                'BackupRetentionPeriod': db['BackupRetentionPeriod'],
-                'VpcSecurityGroupIds': [sg['VpcSecurityGroupId'] for sg in db.get('VpcSecurityGroups', [])]
-            })
+            # Filtra instâncias que são membros de um cluster DB (ex: Aurora)
+            if not db.get('DBClusterIdentifier'):
+                all_rds_instances.append({
+                    'DBInstanceIdentifier': db['DBInstanceIdentifier'],
+                    'Engine': db['Engine'],
+                    'EngineVersion': db.get('EngineVersion'),
+                    'DBInstanceClass': db['DBInstanceClass'],
+                    'DBInstanceStatus': db['DBInstanceStatus'],
+                    'AllocatedStorage': db['AllocatedStorage'],
+                    'EndpointAddress': db.get('Endpoint', {}).get('Address'),
+                    'MultiAZ': db['MultiAZ'],
+                    'PubliclyAccessible': db['PubliclyAccessible'],
+                    'BackupRetentionPeriod': db['BackupRetentionPeriod'],
+                    'VpcSecurityGroupIds': [sg['VpcSecurityGroupId'] for sg in db.get('VpcSecurityGroups', [])],
+                    'Tags': {tag['Key']: tag['Value'] for tag in db.get('TagList', [])}
+                })
         resource_info['RDSInstances'] = all_rds_instances
-        print(f"  Encontradas {len(all_rds_instances)} instâncias RDS.")
+        print(f"  Encontradas {len(all_rds_instances)} instâncias RDS (não-Aurora).")
     except Exception as e:
-        print(f"  Erro ao listar instâncias RDS: {e}")
+        print(f"  Erro ao listar instâncias RDS (não-Aurora): {e}")
         resource_info['RDSInstances'] = f"Erro ao listar: {e}"
+
+    print("Coletando informações de clusters Aurora...")
+    try:
+        # Clusters Aurora
+        db_clusters = get_all_paginated_items(rds_client, 'describe_db_clusters', 'DBClusters')
+        all_aurora_clusters = []
+        for cluster in db_clusters:
+            # Lista as instâncias associadas ao cluster
+            cluster_members = []
+            for member in cluster.get('DBClusterMembers', []):
+                cluster_members.append({
+                    'DBInstanceIdentifier': member['DBInstanceIdentifier'],
+                    'IsClusterWriter': member['IsClusterWriter'],
+                    'PromotionTier': member.get('PromotionTier')
+                })
+
+            all_aurora_clusters.append({
+                'DBClusterIdentifier': cluster['DBClusterIdentifier'],
+                'Engine': cluster['Engine'],
+                'EngineVersion': cluster['EngineVersion'],
+                'Status': cluster['Status'],
+                'Endpoint': cluster.get('Endpoint'),
+                'ReaderEndpoint': cluster.get('ReaderEndpoint'),
+                'MultiAZ': cluster['MultiAZ'],
+                'BackupRetentionPeriod': cluster['BackupRetentionPeriod'],
+                'AllocatedStorage': cluster.get('AllocatedStorage'), # Aurora storage can vary, this is an estimate
+                'VpcSecurityGroupIds': [sg['VpcSecurityGroupId'] for sg in cluster.get('VpcSecurityGroups', [])],
+                'ClusterMembers': cluster_members,
+                'Tags': {tag['Key']: tag['Value'] for tag in cluster.get('TagList', [])}
+            })
+        resource_info['AuroraClusters'] = all_aurora_clusters
+        print(f"  Encontrados {len(all_aurora_clusters)} clusters Aurora.")
+    except Exception as e:
+        print(f"  Erro ao listar clusters Aurora: {e}")
+        resource_info['AuroraClusters'] = f"Erro ao listar: {e}"
 
     # --- Load Balancers (ALB/NLB/ELB) ---
     elbv2_client = boto3.client('elbv2') # Para ALB/NLB
